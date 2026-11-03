@@ -64,7 +64,7 @@ FORMAT
 - Format Brazilian reais as R$ 1.234,56.
 - Write full currency values, for example R$ 1.000,00 and R$ 2.199,00.
 - Do not use emojis.
-- Cite the policy page discreetly, for example "(Store policy, p. 4)".
+- Cite a policy page only when the answer actually relies on a policy excerpt. Never attach a policy citation to a catalog or order answer.
 - End with a helpful offer related to the store, without being pushy.
 """.strip()
 
