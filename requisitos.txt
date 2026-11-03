@@ -1,0 +1,8 @@
+Requisitos de acordo com enunciado do desafio:
+
+- Ter uma personalidade coerente com a loja.
+- Compreender mensagens em linguagem natural.
+- Consultar dados operacionais quando necessário.
+- Consultar as políticas da loja para responder dúvidas.
+- Recusar ou redirecionar solicitações fora do escopo.
+- Demonstrar seu funcionamento em pelo menos três conversas.
