@@ -4,7 +4,7 @@ A Python customer-service agent for Empório da Música, a fictional musical ins
 
 Repository: https://github.com/gabirusky/teste-emporio-agent
 
-The agent answers text messages, uses LLM function calling to query operational data, retrieves store policies from a PDF, and redirects requests that are outside the store's scope. The five interaction examples in `examples/` are real transcripts from the configured model.
+The agent answers text messages, uses LLM function calling to query operational data, retrieves store policies from a PDF, and redirects requests that are outside the store's scope. It runs as a terminal chat and as a local browser chat. The five interaction examples in `examples/` are real transcripts from the configured model.
 
 ## 1. What the agent does
 
@@ -15,13 +15,14 @@ The agent answers text messages, uses LLM function calling to query operational 
 - Retrieves policy excerpts for hours, address, payments, installments, returns, exchanges, warranty, shipping, promotions, privacy, and store scope.
 - Refuses accessory and unrelated requests, redirecting to supported topics.
 - Keeps recent conversation context in memory for the current session.
+- Runs as a terminal chat or a local browser chat with per-session history.
 
 ## 2. Architecture
 
 The design is hybrid: the LLM interprets the customer message, but business facts come from controlled Python tools.
 
 ```text
-Customer message (CLI)
+Customer message (CLI or web)
         |
         v
 MusicStoreAgent + in-memory history
@@ -115,15 +116,19 @@ The model must support function calling. Never commit `.env` or an API key; `.gi
 
 ```bash
 python -m pytest -q
-emporio-agent
+emporio-agent      # terminal chat
+emporio-web        # browser chat at http://127.0.0.1:8000
 ```
 
 CLI commands: `/reset` clears the session history; `/exit` (or `/quit`, `/sair`) ends the program.
 
-You can also run the module directly:
+The web chat keeps one conversation per browser session, shows the tools used for each answer, and includes a reset button. It binds to `127.0.0.1` by default; use `--host` and `--port` to change the address. The server has no authentication and is intended for local testing.
+
+You can also run the modules directly:
 
 ```bash
 PYTHONPATH=src python -m emporio_agent.cli
+PYTHONPATH=src python -m emporio_agent.web
 ```
 
 ## 5. Interaction examples
@@ -144,7 +149,7 @@ Each file shows the customer message, the actual tool call, the assistant respon
 python -m pytest -q
 ```
 
-Result: **19 passed**.
+Result: **26 passed**.
 
 The tests cover:
 
@@ -158,6 +163,7 @@ The tests cover:
 - Out-of-scope redirection and unknown-tool errors.
 - The agent tool loop, malformed tool arguments, provider failure, max tool rounds.
 - Language directives, order-ownership sanitization, history window, and reset.
+- Web chat endpoints, per-session isolation, and reset behavior.
 
 Live smoke test performed on 2026-11-03 with `nvidia/nemotron-3.5-lightning-30b-a3b` through NVIDIA NIM. All five scenarios returned grounded answers with the expected tool calls.
 
@@ -208,7 +214,8 @@ The assistant supported project structuring, Python implementation, debugging, t
 │   ├── config.py
 │   ├── data_store.py
 │   ├── policy_retriever.py
-│   └── tools.py
+│   ├── tools.py
+│   └── web.py
 ├── tests/
 ├── .env.example
 ├── .gitignore
@@ -221,4 +228,5 @@ The assistant supported project structuring, Python implementation, debugging, t
 - Do not commit `.env` or API keys.
 - Use only the fictional sample data during demonstrations.
 - Do not use the order lookup for real customer data without authentication.
+- The web chat binds to localhost by default and has no authentication; do not expose it publicly without adding access control.
 - Treat customer messages and retrieved document text as data, not instructions.

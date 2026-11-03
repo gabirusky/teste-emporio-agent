@@ -16,10 +16,10 @@ The agent adopts the store persona from the policy manual: friendly, welcoming, 
 
 ## 2. Solution Architecture
 
-The implementation is a hybrid architecture combining LLM function calling, structured CSV lookups, and lightweight lexical/fuzzy retrieval over the policy PDF.
+The implementation is a hybrid architecture combining LLM function calling, structured CSV lookups, and lightweight lexical/fuzzy retrieval over the policy PDF. The agent is exposed through a terminal CLI and a local browser chat.
 
 ```text
-Customer message (CLI)
+Customer message (CLI or web)
         |
         v
 MusicStoreAgent + in-memory history
@@ -46,6 +46,7 @@ Main modules:
 | `data_store.py` | CSV loading, validation, fuzzy search, promotions, orders |
 | `policy_retriever.py` | PDF extraction, section-aware chunks, bilingual query expansion |
 | `cli.py` | Terminal interface with `/reset` and `/exit` |
+| `web.py` | Local browser chat server, per-session history, and JSON endpoints |
 | `config.py` | Environment-backed settings |
 
 ## 3. Technical Decisions
@@ -108,6 +109,7 @@ Key rules:
 | Order status | Returns status, items, tracking, and delivery estimate |
 | Policy answers | Retrieves relevant excerpts and cites the page |
 | Out-of-scope | Refuses accessories and unrelated topics, redirects to supported help |
+| Interfaces | Terminal CLI and local browser chat with per-session history |
 
 Safety behavior:
 
@@ -126,9 +128,9 @@ Safety behavior:
 python -m pytest -q
 ```
 
-**Result: 19 passed.**
+**Result: 26 passed.**
 
-Coverage includes availability rules, price filters, active promotions, zero-stock products, fuzzy lookup, order items and warnings, policy retrieval for returns/hours/scope, written price limits, out-of-scope redirection, tool errors, provider failure, max tool rounds, language directives, order-ownership sanitization, history window, and reset.
+Coverage includes availability rules, price filters, active promotions, zero-stock products, fuzzy lookup, order items and warnings, policy retrieval for returns/hours/scope, written price limits, out-of-scope redirection, tool errors, provider failure, max tool rounds, language directives, order-ownership sanitization, history window, web endpoints, per-session isolation, and reset.
 
 ### Live interaction scenarios
 
@@ -192,7 +194,8 @@ cp .env.example .env
 # Set LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL in .env
 
 python -m pytest -q
-emporio-agent
+emporio-agent    # terminal chat
+emporio-web      # browser chat at http://127.0.0.1:8000
 ```
 
 Verified configuration:
@@ -204,6 +207,10 @@ LLM_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
 ```
 
 The `.env` file must remain local and must never be committed.
+
+### Web chat interface
+
+The local browser interface uses the Python standard library, so it adds no dependencies. It keeps one conversation per browser session, shows the tools used for each answer, and includes a reset button. It binds to `127.0.0.1` by default; use `--host` and `--port` to change the address. The server has no authentication and is intended for local testing.
 
 ### AI-assisted development workflow
 
