@@ -20,6 +20,7 @@ class Settings:
     customers_csv: str = os.getenv("CUSTOMERS_CSV", "data/customers.csv")
     categories_csv: str = os.getenv("CATEGORIES_CSV", "data/categories.csv")
     promotions_csv: str = os.getenv("PROMOTIONS_CSV", "data/promotions.csv")
+    order_items_csv: str = os.getenv("ORDER_ITEMS_CSV", "data/order_items.csv")
     policies_pdf: str = os.getenv("POLICIES_PDF", "data/policies.pdf")
 
     def validate_llm(self) -> None:
