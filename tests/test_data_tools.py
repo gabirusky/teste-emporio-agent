@@ -108,3 +108,39 @@ def test_out_of_scope_redirection(tools: AgentTools):
 
 def test_unknown_tool_returns_error(tools: AgentTools):
     assert "Unknown tool" in tools.execute("does_not_exist", {})["error"]
+
+
+def test_flauta_doce_returns_zero_products(data: DataStore):
+    result = data.search_products("flauta doce", only_available=True, limit=10)
+    assert result["count"] == 0
+    assert result["filters"]["category"] == "Instrumentos de Sopro (Madeiras)"
+    assert result["products"] == []
+    assert result["notice"] is not None
+
+
+def test_flauta_returns_zero_products(data: DataStore):
+    result = data.search_products("flauta", only_available=True, limit=10)
+    assert result["count"] == 0
+    assert result["products"] == []
+
+
+def test_unsupported_category_never_recommends_guitars_or_ukuleles(data: DataStore):
+    result = data.search_products("flauta doce", only_available=True, limit=10)
+    categories = {product["category"] for product in result["products"]}
+    assert "Violões" not in categories
+    assert "Guitarras" not in categories
+    assert "Ukuleles" not in categories
+
+
+def test_unsupported_category_normal_searches_still_work(data: DataStore):
+    guitars = data.search_products("guitarra", only_available=True, limit=10)
+    assert guitars["count"] > 0
+    assert all(product["category"] == "Guitarras" for product in guitars["products"])
+
+    ukuleles = data.search_products("ukulele", only_available=True, limit=10)
+    assert ukuleles["count"] > 0
+    assert all(product["category"] == "Ukuleles" for product in ukuleles["products"])
+
+    violoes = data.search_products("violao", only_available=True, limit=10)
+    assert violoes["count"] > 0
+    assert all(product["category"] == "Violões" for product in violoes["products"])

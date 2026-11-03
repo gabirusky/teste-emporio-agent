@@ -161,3 +161,33 @@ def test_history_is_windowed_and_reset_clears_state(tools: AgentTools):
     agent.reset()
     assert agent.history == []
     assert agent.last_tool_calls == []
+
+
+def test_agent_stops_after_one_search_for_unsupported_category(tools: AgentTools):
+    agent, client = make_agent(tools, [
+        tool_response("search_products", {"query": "flauta doce", "only_available": True, "limit": 10}),
+    ], max_tool_rounds=4)
+
+    answer = agent.respond("ola preciso de uma flauta doce para meu filho qual a mais barata")
+
+    assert "human agent" not in answer.lower()
+    assert "não encontramos" in answer.lower() or "do not carry" in answer.lower()
+    # Only one product search should be executed for an unsupported category.
+    search_calls = [call for call in agent.last_tool_calls if call["name"] == "search_products"]
+    assert len(search_calls) == 1
+    assert search_calls[0]["arguments"]["query"] == "flauta doce"
+    # The model should not be called again after the zero-result short-circuit.
+    assert len(client.completions.calls) == 1
+
+
+def test_agent_normal_search_continues_to_work(tools: AgentTools):
+    agent, client = make_agent(tools, [
+        tool_response("search_products", {"query": "Takamine GD20", "limit": 10}),
+        text_response("The Takamine GD20 costs R$ 2.199,00."),
+    ])
+
+    answer = agent.respond("How much does the Takamine GD20 cost?")
+
+    assert answer == "The Takamine GD20 costs R$ 2.199,00."
+    search_calls = [call for call in agent.last_tool_calls if call["name"] == "search_products"]
+    assert len(search_calls) == 1

@@ -9,17 +9,28 @@ from typing import Any
 import pandas as pd
 from rapidfuzz import fuzz
 
-CATEGORY_ALIASES = {
+# Categories present in the catalog (per products.csv). Categories not present
+# in the catalog are listed separately so unsupported instrument queries can be
+# recognized and return zero results instead of unrelated fuzzy matches.
+CATALOG_CATEGORY_ALIASES = {
     1: ["guitarra", "guitarras", "electric guitar", "electric guitars"],
     2: ["baixo", "baixos", "contrabaixo", "bass", "basses"],
     3: ["bateria", "baterias", "drums", "drum kit"],
     4: ["teclado", "teclados", "piano", "pianos", "sintetizador", "synthesizer", "keyboard", "keyboards"],
     5: ["violao", "violoes", "acoustic guitar", "acoustic guitars", "classical guitar", "classical guitars"],
+    9: ["ukulele", "ukuleles"],
+}
+
+# Instrument categories that exist in the store taxonomy but have no products
+# in the current catalog. Queries for these should return zero results rather
+# than unrelated products from other categories.
+UNSUPPORTED_CATEGORY_ALIASES = {
     6: ["sopro", "madeiras", "woodwind", "woodwinds", "flauta", "flute", "clarinete", "clarinet", "saxofone", "saxophone"],
     7: ["metais", "brass", "trompete", "trumpet", "trombone", "tuba", "trompa", "horn"],
     8: ["cordas orquestrais", "orchestral strings", "violino", "violin", "violoncelo", "cello"],
-    9: ["ukulele", "ukuleles"],
 }
+
+CATEGORY_ALIASES = {**CATALOG_CATEGORY_ALIASES, **UNSUPPORTED_CATEGORY_ALIASES}
 
 STOP_WORDS = {
     "a", "an", "and", "are", "at", "available", "be", "below", "buy", "can", "cost",
@@ -96,6 +107,34 @@ def infer_category(text: str) -> int | None:
     if re.search(r"\b(guitarras?|guitars?)\b", normalized) and re.search(r"\b(acoustic|classical|nylon)\b", normalized):
         return 5
     for category_id, aliases in CATEGORY_ALIASES.items():
+        for alias in aliases:
+            if re.search(rf"\b{re.escape(normalize(alias))}\b", normalized):
+                return category_id
+    return None
+
+
+def infer_supported_category(text: str) -> int | None:
+    """Return the category id only when it is represented in the catalog.
+
+    Returns None for unsupported categories (e.g. flutes, brass, orchestral
+    strings) so callers can decide to return zero results instead of falling
+    back to unrelated fuzzy matches.
+    """
+    normalized = normalize(text)
+    if re.search(r"\b(guitarras?|guitars?)\b", normalized) and re.search(r"\b(acoustic|classical|nylon)\b", normalized):
+        return 5
+    for category_id, aliases in CATALOG_CATEGORY_ALIASES.items():
+        for alias in aliases:
+            if re.search(rf"\b{re.escape(normalize(alias))}\b", normalized):
+                return category_id
+    return None
+
+
+def infer_unsupported_category(text: str) -> int | None:
+    """Return the category id when the query names an unsupported instrument
+    category (present in the taxonomy but without products in the catalog)."""
+    normalized = normalize(text)
+    for category_id, aliases in UNSUPPORTED_CATEGORY_ALIASES.items():
         for alias in aliases:
             if re.search(rf"\b{re.escape(normalize(alias))}\b", normalized):
                 return category_id
@@ -227,19 +266,48 @@ class DataStore:
         limit: int = 10,
     ) -> dict[str, Any]:
         inferred_category = infer_category(category or query)
+        unsupported_category = infer_unsupported_category(category or query)
         if max_price is None:
             max_price = parse_price_limit(query)
+
+        # Recognize instrument categories that exist in the taxonomy but have no
+        # products in the current catalog (e.g. flutes). Return zero results
+        # instead of falling back to unrelated fuzzy matches.
+        if unsupported_category is not None and inferred_category == unsupported_category:
+            return {
+                "count": 0,
+                "filters": {
+                    "category": self.category_names.get(unsupported_category),
+                    "max_price_brl": max_price,
+                    "only_available": only_available,
+                },
+                "products": [],
+                "notice": "No products match these filters in the supplied catalog.",
+            }
 
         frame = self.products.copy()
         if only_available:
             frame = frame[(frame["status"] == "active") & (frame["stock_quantity"] > 0)]
         if inferred_category is not None:
             frame = frame[frame["category_id"] == inferred_category]
+
+        if frame.empty:
+            return {
+                "count": 0,
+                "filters": {
+                    "category": self.category_names.get(inferred_category) if inferred_category else None,
+                    "max_price_brl": max_price,
+                    "only_available": only_available,
+                },
+                "products": [],
+                "notice": "No products match these filters in the supplied catalog.",
+            }
+
         frame = frame.assign(
             effective_price=frame.apply(
                 lambda row: self._effective_price(float(row["price_brl"]), self.active_promotions.get(int(row["product_id"]))),
                 axis=1,
-            )
+            ).astype(float)
         )
         if max_price is not None:
             frame = frame[frame["effective_price"] <= max_price + 0.001]
