@@ -14,6 +14,8 @@ The agent answers text messages, uses LLM function calling to query operational 
 - Looks up demonstration orders by numeric ID, including items, tracking, and delivery estimate.
 - Retrieves policy excerpts for hours, address, payments, installments, returns, exchanges, warranty, shipping, promotions, privacy, and store scope.
 - Refuses accessory and unrelated requests, redirecting to supported topics.
+- Recognizes instrument categories missing from the catalog (e.g., flauta doce / wind instruments) and answers honestly instead of recommending unrelated products.
+- Deduplicates repeated tool calls within the same turn.
 - Keeps recent conversation context in memory for the current session.
 - Runs as a terminal chat or a local browser chat with per-session history.
 
@@ -112,6 +114,17 @@ LLM_MODEL=your_model_with_tool_calling_support
 
 The model must support function calling. Never commit `.env` or an API key; `.gitignore` excludes `.env`.
 
+### Quick start
+
+Shortest command to open the browser chat:
+
+```bash
+python -m pip install -e ".[dev]" && cp .env.example .env && emporio-web --port 8000
+# Open http://127.0.0.1:8000 in the browser
+```
+
+`emporio-web` binds to `127.0.0.1:8000` by default. Use `--host` and `--port` to change the address (e.g. `--port 0` for a free port). The web chat keeps one conversation per browser session, shows the tools used for each answer, and includes a reset button. It has no authentication and is intended for local testing.
+
 ### Run
 
 ```bash
@@ -149,9 +162,25 @@ Each file shows the customer message, the actual tool call, the assistant respon
 python -m pytest -q
 ```
 
-Result: **26 passed**.
+Result: **32 passed**.
 
 The tests cover:
+
+- Availability filtering and maximum-price limits.
+- Active promotions and effective prices.
+- Zero-stock and discontinued products.
+- Fuzzy product lookup.
+- Order status, line items, and the authentication warning.
+- Policy retrieval for returns, hours, and accessory scope.
+- Written price limits such as “up to one thousand”.
+- Out-of-scope redirection and unknown-tool errors.
+- The agent tool loop, malformed tool arguments, provider failure, max tool rounds.
+- Language directives, order-ownership sanitization, history window, and reset.
+- Web chat endpoints, per-session isolation, and reset behavior.
+- Unsupported instrument categories return zero results without unrelated fuzzy matches.
+- Repeated tool calls in the same turn are deduplicated.
+
+Live smoke test performed on 2026-11-03 with `nvidia/nemotron-3.5-lightning-30b-a3b` through NVIDIA NIM. All five scenarios returned grounded answers with the expected tool calls.
 
 - Availability filtering and maximum-price limits.
 - Active promotions and effective prices.
@@ -190,7 +219,7 @@ Live smoke test performed on 2026-11-03 with `nvidia/nemotron-3.5-lightning-30b-
 
 ## 9. AI-assisted development workflow
 
-This project was developed with **opencode** using the **DeepSeek V4.1 Flash** model as an AI coding assistant.
+This project was developed with **opencode** using the **DeepSeek V4.1 Flash**, **Nemotron 3.5 Super VL** and **Step 5 Preview** model as an AI coding assistant.
 
 The assistant supported project structuring, Python implementation, debugging, test creation, documentation, and architectural decisions. All generated code and suggestions were reviewed, executed, and validated with the automated test suite and live provider calls. The final architecture, limitations, and results are documented here so they can be explained and defended independently.
 
@@ -217,9 +246,13 @@ The assistant supported project structuring, Python implementation, debugging, t
 │   ├── tools.py
 │   └── web.py
 ├── tests/
+├── submission/
+│   ├── technical_case.md
+│   └── render_pdf.py
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml
+├── requisitos.txt
 └── README.md
 ```
 

@@ -109,6 +109,7 @@ Key rules:
 | Order status | Returns status, items, tracking, and delivery estimate |
 | Policy answers | Retrieves relevant excerpts and cites the page |
 | Out-of-scope | Refuses accessories and unrelated topics, redirects to supported help |
+| Category awareness | Requests for instrument categories absent from the catalog (e.g., flauta doce) return zero results instead of unrelated matches |
 | Interfaces | Terminal CLI and local browser chat with per-session history |
 
 Safety behavior:
@@ -119,6 +120,7 @@ Safety behavior:
 - It cannot place orders, reserve stock, process payments, cancel orders, or change records.
 - It treats customer messages and retrieved text as data, not instructions.
 - It handles provider failures and malformed tool arguments with safe fallbacks.
+- It deduplicates repeated tool calls within the same turn.
 
 ## 6. Testing and Evaluation
 
@@ -128,9 +130,9 @@ Safety behavior:
 python -m pytest -q
 ```
 
-**Result: 26 passed.**
+**Result: 32 passed.**
 
-Coverage includes availability rules, price filters, active promotions, zero-stock products, fuzzy lookup, order items and warnings, policy retrieval for returns/hours/scope, written price limits, out-of-scope redirection, tool errors, provider failure, max tool rounds, language directives, order-ownership sanitization, history window, web endpoints, per-session isolation, and reset.
+Coverage includes availability rules, price filters, active promotions, zero-stock products, fuzzy lookup, order items and warnings, policy retrieval for returns/hours/scope, written price limits, out-of-scope redirection, tool errors, provider failure, max tool rounds, language directives, order-ownership sanitization, history window, web endpoints, per-session isolation, reset, unsupported instrument categories (zero results without unrelated matches), and tool-call deduplication within a turn.
 
 ### Live interaction scenarios
 
@@ -195,7 +197,7 @@ cp .env.example .env
 
 python -m pytest -q
 emporio-agent    # terminal chat
-emporio-web      # browser chat at http://127.0.0.1:8000
+emporio-web --port 8000   # browser chat at http://127.0.0.1:8000 — short command to open the web chat
 ```
 
 Verified configuration:
@@ -214,7 +216,7 @@ The local browser interface uses the Python standard library, so it adds no depe
 
 ### AI-assisted development workflow
 
-This project was developed with **opencode** using the **DeepSeek V4.1 Flash** model as an AI coding assistant.
+This project was developed with **opencode** using the **DeepSeek V4.1 Flash**, **Nemotron 3.5 Super VL**, and **Step 5 Preview** models as AI coding assistants.
 
 The assistant supported project structuring, Python implementation, debugging, test creation, documentation, and architectural decisions. All generated code and suggestions were reviewed, executed, and validated with the automated test suite and live provider calls. The final architecture, limitations, and results are documented in the README so they can be explained and defended independently.
 
