@@ -20,6 +20,7 @@ dev = ["pytest>=8.0.0"]
 
 [project.scripts]
 emporio-agent = "emporio_agent.cli:main"
+emporio-web = "emporio_agent.web:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
