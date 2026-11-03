@@ -30,6 +30,8 @@ STOP_WORDS = {
     "qual", "quanto", "que", "reais", "store", "tem", "the", "to", "under", "up", "valor",
     "want", "which", "with", "you", "your", "custa", "custam", "disponivel", "disponiveis",
     "estoque", "instrumento", "instrumentos", "r", "rs", "ate", "mil",
+    "one", "two", "three", "four", "five", "hundred", "thousand", "million",
+    "dois", "tres", "quatro", "cinco", "cem",
 }
 
 NUMBER_WORDS = {
