@@ -23,25 +23,45 @@ CSS = """
 }
 body {
   font-family: "Liberation Sans", sans-serif;
-  font-size: 10.5pt;
+  font-size: 9.8pt;
   color: #1f2937;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 h1 {
-  font-size: 21pt;
+  font-size: 19pt;
   font-weight: bold;
-  color: #111827;
-  margin: 0 0 12pt 0;
-  line-height: 1.45;
-  background-color: #b45309;
-  padding: 10pt 14pt;
+  color: #b45309;
+  margin: 0 0 3pt 0;
+  line-height: 1.35;
+}
+h1 .subtitle {
+  font-size: 9pt;
+  font-weight: normal;
+  color: #4b5563;
+  display: block;
+  margin-top: 1.5pt;
+}
+h1 .meta {
+  font-size: 8pt;
+  color: #6b7280;
+  display: block;
+  margin-top: 1.5pt;
+  line-height: 1.4;
 }
 h2 {
-  font-size: 14pt;
+  font-size: 12pt;
   font-weight: bold;
-  color: #92400e;
-  margin-top: 20pt;
-  margin-bottom: 8pt;
+  color: #b45309;
+  margin-top: 13pt;
+  margin-bottom: 4pt;
+  padding-bottom: 2pt;
+  border-bottom: 1.5pt solid #d97706;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 6pt 0;
+  font-size: 8.6pt;
 }
 h2.appendix {
   margin-top: 20pt;
@@ -111,6 +131,27 @@ figure {
 figure img {
   border: 1px solid #d1d5db;
   max-width: 100%;
+}
+figure.appendix {
+  margin-top: 12pt;
+  page-break-inside: avoid;
+}
+figure.appendix img {
+  max-width: 44%;
+}
+figcaption {
+  font-size: 8.2pt;
+  color: #4b5563;
+  margin-top: 3pt;
+}
+pre {
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+  padding: 6pt;
+  font-family: "Liberation Mono", monospace;
+  font-size: 8.2pt;
+  margin: 0 0 8pt 0;
+  overflow-x: auto;
 }
 figcaption {
   font-size: 9pt;

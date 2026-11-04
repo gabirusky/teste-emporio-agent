@@ -2,7 +2,7 @@
 
 A Python customer-service agent for Empório da Música, a fictional musical instrument store in Campo Grande, Brazil. Built for the Artefact AI Engineer technical challenge.
 
-The agent answers text messages, uses LLM function calling to query operational data, retrieves store policies from a PDF, and redirects requests that are outside the store's scope. It runs as a terminal chat and as a local browser chat. The five interaction examples in `examples/` are real transcripts from the configured model.
+The agent answers text messages, uses LLM function calling to query operational data, retrieves store policies from a PDF, and redirects requests that are outside the store's scope. It runs as a terminal chat and as a local browser chat. The nine interaction examples in `examples/` include real transcripts from the configured model and manual edge cases.
 
 ## 1. What the agent does
 
@@ -144,13 +144,17 @@ PYTHONPATH=src python -m emporio_agent.web
 
 ## 5. Interaction examples
 
-Five real transcripts are in `examples/`:
+Nine real transcripts are in `examples/`:
 
 1. [Product search under R$1,000](examples/01_product_search.md)
 2. [Price of a specific model](examples/02_specific_price.md)
 3. [Online return policy](examples/03_return_policy.md) — non-trivial policy case
 4. [Order status](examples/04_order_status.md)
 5. [Out-of-scope request](examples/05_out_of_scope.md)
+6. [Python purchase script request](examples/06_python_purchase_script.md) — out-of-scope automation
+7. [Most expensive instrument in the store](examples/07_most_expensive_instrument.md) — numeric price ranking
+8. [Cheapest Yamaha model](examples/08_cheapest_yamaha.md) — brand + availability + price sorting
+9. [Complete stock count](examples/09_full_stock_count.md) — full eligible catalog and total units
 
 Each file shows the customer message, the actual tool call, the assistant response, and the observed behavior.
 

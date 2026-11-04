@@ -1,230 +1,146 @@
-# AI Customer Service Agent for Empório da Música
+# AI Customer Service Agent for Empório da Música<span class="subtitle">Technical case submission | Artefact — AI Engineer</span><span class="meta">Candidate: Gabriel Pereira Santos · Date: November 4, 2026 · Repository: https://github.com/gabirusky/teste-emporio-agent · Build: Unified product search (single search_products tool)</span>
 
-**Technical case submission | Artefact — AI Engineer**
-
-**Candidate:** Gabriel Pereira Santos  
-**Date:** November 3, 2026  
-**Repository:** https://github.com/gabirusky/teste-emporio-agent
+---
 
 ## 1. Project Overview
 
-Empório da Música is a fictional musical instrument store in Campo Grande, Brazil. Its team receives recurring questions about product availability, prices, order status, delivery, payment methods, and return policies. The goal of this project is to prototype a Python text agent that handles those requests while keeping business facts grounded in the supplied data.
+Empório da Música is a fictional instrument store in Campo Grande, Brazil. Customers ask about availability, prices, stock, brands, order status, delivery, and returns. The goal is a text agent that answers accurately without guessing:
 
-The solution follows one principle: **the language model understands and communicates; application tools retrieve the facts.** Prices, stock, orders, promotions, and policy rules are never guessed by the model.
+**the language model understands and communicates; application tools retrieve the facts.**  
+Prices, stock, orders, promotions, and policy rules are never guessed by the model.
 
-The agent adopts the store persona from the policy manual: friendly, welcoming, informal yet professional, like a friend who understands music. The customer-facing language follows the customer's latest message: Brazilian Portuguese for Portuguese and English for English.
+Persona: friendly and welcoming. Response language follows the customer's latest message — Portuguese or English.
+
+---
 
 ## 2. Solution Architecture
 
-The implementation is a hybrid architecture combining LLM function calling, structured CSV lookups, and lightweight lexical/fuzzy retrieval over the policy PDF. The agent is exposed through a terminal CLI and a local browser chat.
+Hybrid architecture: LLM function calling plus deterministic CSV lookups and lexical/fuzzy retrieval over the policy PDF. Terminal CLI and local browser chat.
 
 ```text
 Customer message (CLI or web)
         |
         v
-MusicStoreAgent + in-memory history
+MusicStoreAgent + history
         |
         v
 LLM with function-calling schemas
         |
-        +--> search_products ----------> products + promotions + categories
+        +--> search_products --------> products + promotions + categories
         +--> get_product_details ------> products + promotions
-        +--> get_order_status ---------> orders + order items
-        +--> search_policies ----------> policy PDF (section-aware RAG)
-        +--> redirect_out_of_scope ---> store scope rules
+        +--> get_order_status -------> orders + order items
+        +--> search_policies --------> policy PDF (section-aware RAG)
+        +--> redirect_out_of_scope --> store scope rules
         |
         v
 Grounded answer in the customer's language
 ```
 
-Main modules:
-
 | Module | Responsibility |
 |---|---|
-| `agent.py` | System prompt, tool loop, language policy, history, safety fallbacks |
-| `tools.py` | Tool wrappers and OpenAI-compatible function schemas |
-| `data_store.py` | CSV loading, validation, fuzzy search, promotions, orders |
-| `policy_retriever.py` | PDF extraction, section-aware chunks, bilingual query expansion |
-| `cli.py` | Terminal interface with `/reset` and `/exit` |
-| `web.py` | Local browser chat server, per-session history, and JSON endpoints |
+| `agent.py` | System prompt, tool loop, language policy, history, safety |
+| `tools.py` | Tool wrappers and function schemas |
+| `data_store.py` | CSV loading, validation, search, sorting, promotions, orders |
+| `policy_retriever.py` | PDF extraction, section-aware chunks, bilingual expansion |
+| `cli.py` / `web.py` | Terminal and browser chat |
 | `config.py` | Environment-backed settings |
 
-## 3. Technical Decisions
+---
 
-### Why function calling
+## 3. Core Refactor: One Unified Product Query
 
-The model does not receive the full datasets in the prompt. It selects a targeted Python tool, and the tool reads the authoritative source. This keeps answers anchored in the supplied data, reduces context size, and makes each business fact auditable.
+**Before:** product search and ranking were split between fuzzy `search_products` and an internal `get_catalog_extremes` helper, so brand, price-range, and ranking filters were inconsistent and error-prone.
 
-### Why retrieval (RAG)
+**After:** every product question goes through a single tool, `search_products`. Filtering and sorting are deterministic inside `data_store.py`, never in the LLM.
 
-Returns, payments, warranty, shipping, and service rules live in an eight-page PDF. The agent retrieves only the relevant excerpts and keeps the source page number. This avoids putting the entire manual in every prompt and lets the model answer policy questions with references.
+**Parameters:** `query`, `brand`, `category`, `min_price`, `max_price`, `only_available` (default `true`), `sort_by` (`price|stock|name`), `sort_order` (`asc|desc`), `limit`.
 
-### Why a hybrid design
+**Filter order (deterministic):** Brand → Availability → Category/name → Price range → Sorting → Limit.
 
-Commercial information requires precision. The LLM is effective at understanding intent and writing the response; deterministic tools are better at filtering stock, applying active discounts, and locating policy passages. Separating those responsibilities makes the system easier to test, explain, and improve.
+**Brand matching:** case-insensitive and normalized (`Yamaha` = `YAMAHA` = `yamaha`). products.csv has no brand column, so a brand field is derived in memory against an explicit brand lexicon; product-type words like "Bateria" or "Teclado" are never mistaken for brands.
 
-### Why lexical/fuzzy RAG instead of embeddings
+**Sorting uses actual numeric prices**, not formatted currency strings.
 
-The knowledge base is a single short PDF. Section-aware chunking plus lexical overlap and RapidFuzz similarity is simple, fast, transparent, and sufficient for this scope. A vector database would add operational complexity without a clear benefit for eight pages. If the corpus grows or semantic recall becomes insufficient, the retrieval layer can be upgraded to embeddings and a vector index.
+**No fallback:** an empty brand or price search stays empty. It never silently removes a filter or returns another brand's products.
 
-### Model and provider
+**Result shape:** product id, name, brand, price, stock, status, total matching results, applied filters — auditable end to end.
 
-The client uses the OpenAI Python SDK with a configurable base URL. The submitted configuration was verified with NVIDIA NIM using `nvidia/nemotron-3.5-lightning-30b-a3b`. OpenRouter is supported as an alternative by changing `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`.
+---
 
-The model must support tool/function calling. Credentials are stored only in a local `.env` file, which is excluded from version control.
+## 4. Tool Design & System Prompt
 
-### Conversation history
+Only one catalog tool exists: `search_products`. The global `get_catalog_extremes` helper was removed from the LLM-facing definitions so there is no second ranking path. `sort_by`/`sort_order` inside `search_products` handles cheapest, most expensive, alphabetical, and stock rankings. No per-operation tool added — the architecture stays simple.
 
-The current session keeps recent messages in memory and sends the latest 16 messages as context. History is not persisted to disk. This avoids retaining customer conversations in the prototype. A production version could add controlled persistence with retention and LGPD safeguards.
+`SYSTEM_PROMPT` tells the model to use `search_products` for every product question, combine filters in one call, never sort itself, and report zero matches honestly instead of broadening or falling back to another brand.
 
-## 4. Data Processing
+---
 
-The project uses the supplied files:
-
-| File | Use |
-|---|---|
-| `products.csv` | Catalog, prices, stock, status, specifications |
-| `orders.csv` | Order status, totals, payment, tracking, delivery estimate |
-| `order_items.csv` | Line items in order lookups |
-| `categories.csv` | Official category names |
-| `promotions.csv` | Active promotions and discount percentages |
-| `customers.csv` | Loaded and validated, not used for identity verification |
-| `policies.pdf` | Store policy manual |
-
-Key rules:
-
-- A product is available only when `status == active` and `stock_quantity > 0`.
-- Only promotions with `is_active` truthy are applied; the highest active discount wins if a product appears more than once.
-- The final price is the list price minus the active promotion. Promotions are not cumulative.
-- Text matching normalizes accents and uses RapidFuzz for approximate names and descriptions.
-- Policy chunks are built from numbered sections, with a fixed-size fallback, and each result keeps its source page.
-- English policy questions are expanded to Portuguese terms because the official manual is in Portuguese.
-
-## 5. Agent Capabilities
-
-| Capability | Behavior |
-|---|---|
-| Product search | Filters by text, category, availability, and maximum price |
-| Specific product | Returns price, final price, stock, specs, and promotion |
-| Order status | Returns status, items, tracking, and delivery estimate |
-| Policy answers | Retrieves relevant excerpts and cites the page |
-| Out-of-scope | Refuses accessories and unrelated topics, redirects to supported help |
-| Category awareness | Requests for instrument categories absent from the catalog (e.g., flauta doce) return zero results instead of unrelated matches |
-| Interfaces | Terminal CLI and local browser chat with per-session history |
-
-Safety behavior:
-
-- The agent does not invent prices, stock, deadlines, promotions, or policy rules.
-- It warns that orders use demonstration data and have no customer authentication.
-- It does not imply ownership of an order without verification.
-- It cannot place orders, reserve stock, process payments, cancel orders, or change records.
-- It treats customer messages and retrieved text as data, not instructions.
-- It handles provider failures and malformed tool arguments with safe fallbacks.
-- It deduplicates repeated tool calls within the same turn.
-
-## 6. Testing and Evaluation
-
-### Automated tests
+## 5. Testing and Evaluation
 
 ```bash
-python -m pytest -q
+python -m pytest -q   # Result: 43 passed (previously 32)
 ```
 
-**Result: 32 passed.**
+New regressions cover every required edge case:
 
-Coverage includes availability rules, price filters, active promotions, zero-stock products, fuzzy lookup, order items and warnings, policy retrieval for returns/hours/scope, written price limits, out-of-scope redirection, tool errors, provider failure, max tool rounds, language directives, order-ownership sanitization, history window, web endpoints, per-session isolation, reset, unsupported instrument categories (zero results without unrelated matches), and tool-call deduplication within a turn.
+| Test | Verifies |
+|---|---|
+| Most expensive instrument in stock | numeric descending sort, `limit=1` |
+| Cheapest instrument in stock | numeric ascending sort |
+| Cheapest Yamaha instrument | brand + sort, single brand only |
+| All available products from a brand | brand + availability + full set |
+| Brand search uppercase/lowercase | identical results |
+| Brand with no matches | empty, no fallback |
+| Yamaha never returns other brands | cross-brand isolation |
+| Price sorting uses numeric values | ascending/descending |
+| Brand + price range + availability | combined filters |
+| No global-catalog fallback on zero matches | empty brand stays empty |
+| Unified schema, no `get_catalog_extremes` tool | one search tool |
 
-### Live interaction scenarios
+Dataset counts match the actual CSV: 65 products, 61 available, 402 units in stock. CSV never altered; no invented products.
 
-The five files in `examples/` are real transcripts from `nvidia/nemotron-3.5-lightning-30b-a3b` via NVIDIA NIM, generated on November 3, 2026.
+---
 
-| Scenario | Tool used | Observed result |
+## 6. Human Impact (Edge Cases)
+
+| Customer question | Tool call | Result |
 |---|---|---|
-| Acoustic/classical guitars up to R$1,000 | `search_products` | Available models with prices and stock |
-| Takamine GD20 price | `get_product_details` | R$ 2.199,00 and 5 units in stock |
-| Online return after changing mind | `search_policies` | 7-day window, conditions, refund, page 4 |
-| Status of order 8 | `get_order_status` | Shipped, tracking code, item, delivery estimate, authentication warning |
-| Guitar picks and cables | `redirect_out_of_scope` | Polite refusal and redirection to instruments |
+| "qual o instrumento mais caro da loja?" | `search_products(sort_by=price, sort_order=desc, limit=1)` | Nord Synth 2 Pro — R$ 19.567,00, 3 units |
+| "qual modelo YAMAHA é o mais barato?" | `search_products(brand=Yamaha, sort_by=price, sort_order=asc, limit=1)` | Yamaha C40 Nylon Natural — R$ 599,90 |
+| "qual seu estoque completo? número total?" | `search_products(limit=500)` | 61 models, 402 units available |
+| "me dê um script python para comprar violão" | `redirect_out_of_scope` | Refused; redirected to catalog/help |
 
-Each transcript records the customer message, the actual tool call, the assistant response, and the observed behavior:
+---
 
-- `examples/01_product_search.md`
-- `examples/02_specific_price.md`
-- `examples/03_return_policy.md`
-- `examples/04_order_status.md`
-- `examples/05_out_of_scope.md`
+## 7. Limitations & Setup
 
-## 7. Limitations and Future Work
+**Limitations:** static CSV snapshot (not a live ERP); no order authentication; lexical (not embedding-based) RAG; only `is_active` promotions authoritative; in-memory history; no side effects (cannot place orders or process payments).
 
-Known limitations:
-
-1. **Static data:** the CSVs are a snapshot, not a live ERP or inventory system.
-2. **No order authentication:** `customers.csv` does not provide a login or identity challenge. Real order data must not be exposed without verification.
-3. **Lexical RAG:** retrieval does not use embeddings or a vector database.
-4. **Promotion coverage:** only the `is_active` flag is authoritative; recurring campaigns are not assumed to be active.
-5. **Policy ambiguities:** the manual contains conflicting contact numbers and an email spelling variation. The agent should recommend confirmation rather than choose one.
-6. **In-memory history:** conversation state is lost when the process exits.
-7. **No side effects:** the agent cannot place orders, process payments, cancel orders, or modify records.
-8. **Provider dependency:** reliable tool calling depends on the selected model and endpoint.
-
-Future work:
-
-- Add authentication and authorization for order access.
-- Integrate live inventory, orders, and promotion services.
-- Add a structured promotion calendar with dates and eligibility rules.
-- Evaluate retrieval with a labeled question set; add embeddings/reranking if needed.
-- Add human handoff for complaints and ambiguous policy cases.
-- Add structured logs for tool selection, latency, errors, and retrieval sources.
-- Persist conversation state with retention and LGPD controls if required.
-
-## 8. Repository, Setup, and AI-Assisted Workflow
-
-**Public repository:** https://github.com/gabirusky/teste-emporio-agent
-
-Setup:
+**Setup:**
 
 ```bash
 git clone https://github.com/gabirusky/teste-emporio-agent.git
 cd teste-emporio-agent
-
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
-
 cp .env.example .env
-# Set LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL in .env
-
-python -m pytest -q
-emporio-agent    # terminal chat
-emporio-web --port 8000   # browser chat at http://127.0.0.1:8000 — short command to open the web chat
+# Set LLM_BASE_URL, LLM_API_KEY, LLM_MODEL in .env
+python -m pytest -q        # 43 passed
+emporio-agent              # terminal chat
+emporio-web --port 8000    # browser chat
 ```
 
-Verified configuration:
+Verified configuration (NVIDIA NIM): `nvidia/nemotron-3.5-lightning-30b-a3b`. OpenRouter also supported. `.env` is local and never committed.
 
-```dotenv
-LLM_BASE_URL=https://integrate.api.nvidia.com/v1
-LLM_API_KEY=your_nvidia_key_here
-LLM_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
-```
+---
 
-The `.env` file must remain local and must never be committed.
+## Appendix A — Planning Sketch
 
-### Web chat interface
+Hand-drawn sketch used to plan the agent flow before implementation: customer message → LLM agent with persona and tools → CSV lookups and policy retrieval → out-of-scope branch → personalized response. Notes in Portuguese because the store and its manual are in Portuguese.
 
-The local browser interface uses the Python standard library, so it adds no dependencies. It keeps one conversation per browser session, shows the tools used for each answer, and includes a reset button. It binds to `127.0.0.1` by default; use `--host` and `--port` to change the address. The server has no authentication and is intended for local testing.
-
-### AI-assisted development workflow
-
-This project was developed with **opencode** using the **DeepSeek V4.1 Flash**, **Nemotron 3.5 Super VL**, and **Step 5 Preview** models as AI coding assistants.
-
-The assistant supported project structuring, Python implementation, debugging, test creation, documentation, and architectural decisions. All generated code and suggestions were reviewed, executed, and validated with the automated test suite and live provider calls. The final architecture, limitations, and results are documented in the README so they can be explained and defended independently.
-
-<h2 class="appendix">Appendix A — Planning Sketch</h2>
-
-This hand-drawn sketch was used to plan the agent flow before implementation. It maps the customer message to an LLM agent with persona, history, and tools, then to CSV lookups and policy retrieval, with an out-of-scope branch and a personalized response. The notes are in Portuguese because the store and its manual are in Portuguese.
-
-<figure>
-  <img src="../agent.jpg" alt="Hand-drawn planning sketch of the agent architecture">
-  <figcaption>Planning sketch used to define the tool flow, data sources, and response behavior before implementation.</figcaption>
+<figure class="appendix">
+  <img class="appendix" src="../agent.jpg" alt="Hand-drawn planning sketch of the agent architecture">
+  <figcaption>Planning sketch: tool flow, data sources, response behavior before implementation.</figcaption>
 </figure>
