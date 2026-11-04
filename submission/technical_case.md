@@ -4,12 +4,26 @@
 
 ## 1. Project Overview
 
-Empório da Música is a fictional instrument store in Campo Grande, Brazil. Customers ask about availability, prices, stock, brands, order status, delivery, and returns. The goal is a text agent that answers accurately without guessing:
+Empório da Música is a fictional musical instrument store in Campo Grande, Brazil. Its customers regularly ask about instrument availability, prices, stock, brands, order status, delivery, payment methods, and return policies. The goal of this project is to prototype a Python text agent that handles those requests accurately while keeping every business fact grounded in the supplied data — never guessed by the model.
 
-**the language model understands and communicates; application tools retrieve the facts.**  
-Prices, stock, orders, promotions, and policy rules are never guessed by the model.
+**The language model understands and communicates; application tools retrieve the facts.** Prices, stock, orders, promotions, and policy rules always come from controlled Python tools that read the authoritative CSVs and policy PDF, so answers are auditable and hallucination-free.
 
-Persona: friendly and welcoming. Response language follows the customer's latest message — Portuguese or English.
+### What the agent does
+
+- Answers customers in their language: Brazilian Portuguese for Portuguese, English for English.
+- Searches the product catalog with one unified tool: name/query, brand, category, minimum and maximum price, availability, and deterministic sorting by price, stock, or name.
+- Reports brand, list price, final price, stock, status, total matching results, and applied filters.
+- Looks up demonstration orders by numeric ID, including items, tracking, and delivery estimate.
+- Retrieves policy excerpts for hours, address, payments, installments, returns, exchanges, warranty, shipping, promotions, privacy, and store scope.
+- Refuses accessory and unrelated requests, redirecting to supported topics.
+- Recognizes instrument categories missing from the catalog (e.g., flauta doce / wind instruments) and answers honestly instead of recommending unrelated products.
+- Deduplicates repeated tool calls within the same turn.
+- Keeps recent conversation context in memory for the current session.
+- Runs as a terminal chat or a local browser chat with per-session history.
+
+### Persona and tone
+
+The agent adopts the store persona from the policy manual: friendly, welcoming, informal yet professional — like a friend who understands music. The customer-facing language follows the customer's latest message: Portuguese for Portuguese, English for English. It never invents prices, stock, deadlines, promotions, or policy rules, and it never places orders, reserves stock, or processes payments.
 
 ---
 
@@ -49,7 +63,7 @@ Grounded answer in the customer's language
 
 ## 3. Core Refactor: One Unified Product Query
 
-**Before:** product search and ranking were split between fuzzy `search_products` and an internal `get_catalog_extremes` helper, so brand, price-range, and ranking filters were inconsistent and error-prone.
+**Before:** product search and ranking were inconsistent — brand, price-range, and ranking filters lived in separate code paths and were error-prone.
 
 **After:** every product question goes through a single tool, `search_products`. Filtering and sorting are deterministic inside `data_store.py`, never in the LLM.
 
@@ -69,7 +83,7 @@ Grounded answer in the customer's language
 
 ## 4. Tool Design & System Prompt
 
-Only one catalog tool exists: `search_products`. The global `get_catalog_extremes` helper was removed from the LLM-facing definitions so there is no second ranking path. `sort_by`/`sort_order` inside `search_products` handles cheapest, most expensive, alphabetical, and stock rankings. No per-operation tool added — the architecture stays simple.
+Only one catalog tool exists: `search_products`. `sort_by`/`sort_order` inside `search_products` handles cheapest, most expensive, alphabetical, and stock rankings. No per-operation tool added — the architecture stays simple.
 
 `SYSTEM_PROMPT` tells the model to use `search_products` for every product question, combine filters in one call, never sort itself, and report zero matches honestly instead of broadening or falling back to another brand.
 
@@ -95,7 +109,7 @@ New regressions cover every required edge case:
 | Price sorting uses numeric values | ascending/descending |
 | Brand + price range + availability | combined filters |
 | No global-catalog fallback on zero matches | empty brand stays empty |
-| Unified schema, no `get_catalog_extremes` tool | one search tool |
+| Unified schema, one search tool only | one search tool |
 
 Dataset counts match the actual CSV: 65 products, 61 available, 402 units in stock. CSV never altered; no invented products.
 
