@@ -2,15 +2,13 @@
 
 A Python customer-service agent for Empório da Música, a fictional musical instrument store in Campo Grande, Brazil. Built for the Artefact AI Engineer technical challenge.
 
-Repository: https://github.com/gabirusky/teste-emporio-agent
-
 The agent answers text messages, uses LLM function calling to query operational data, retrieves store policies from a PDF, and redirects requests that are outside the store's scope. It runs as a terminal chat and as a local browser chat. The five interaction examples in `examples/` are real transcripts from the configured model.
 
 ## 1. What the agent does
 
 - Answers customers in their language: pt-BR for Portuguese, English for English.
-- Searches the product catalog by name, category, model, availability, and maximum price.
-- Reports list price, final price, stock, and active promotions.
+- Searches the product catalog with one unified tool: name/query, brand, category, minimum and maximum price, availability, and deterministic sorting by price, stock, or name.
+- Reports brand, list price, final price, stock, status, total matching results, and applied filters.
 - Looks up demonstration orders by numeric ID, including items, tracking, and delivery estimate.
 - Retrieves policy excerpts for hours, address, payments, installments, returns, exchanges, warranty, shipping, promotions, privacy, and store scope.
 - Refuses accessory and unrelated requests, redirecting to supported topics.
@@ -60,7 +58,7 @@ The project uses the files supplied for the challenge:
 
 | File | Use |
 |---|---|
-| `data/products.csv` | Catalog, prices, stock, status, specifications |
+| `data/products.csv` | Catalog, prices, stock, status, specifications; brands are derived in memory because the CSV has no brand column |
 | `data/orders.csv` | Order status, totals, payment, tracking, delivery estimate |
 | `data/order_items.csv` | Line items shown in order lookups |
 | `data/categories.csv` | Official category names |
@@ -162,11 +160,14 @@ Each file shows the customer message, the actual tool call, the assistant respon
 python -m pytest -q
 ```
 
-Result: **32 passed**.
+Result: **43 passed**.
 
 The tests cover:
 
-- Availability filtering and maximum-price limits.
+- Availability filtering, minimum/maximum price limits, brand filtering, and deterministic sorting.
+- Cheapest and most expensive products in stock, cheapest Yamaha in stock, and all available Yamaha products.
+- Case-insensitive brand matching, zero-match brands, and no fallback to the global catalog.
+- Numeric price sorting and combined brand + price range + availability filters.
 - Active promotions and effective prices.
 - Zero-stock and discontinued products.
 - Fuzzy product lookup.
@@ -178,21 +179,9 @@ The tests cover:
 - Language directives, order-ownership sanitization, history window, and reset.
 - Web chat endpoints, per-session isolation, and reset behavior.
 - Unsupported instrument categories return zero results without unrelated fuzzy matches.
-- Repeated tool calls in the same turn are deduplicated.
-
-Live smoke test performed on 2026-11-03 with `nvidia/nemotron-3.5-lightning-30b-a3b` through NVIDIA NIM. All five scenarios returned grounded answers with the expected tool calls.
-
-- Availability filtering and maximum-price limits.
-- Active promotions and effective prices.
-- Zero-stock and discontinued products.
-- Fuzzy product lookup.
-- Order status, line items, and the authentication warning.
-- Policy retrieval for returns, hours, and accessory scope.
-- Written price limits such as “up to one thousand”.
-- Out-of-scope redirection and unknown-tool errors.
-- The agent tool loop, malformed tool arguments, provider failure, max tool rounds.
-- Language directives, order-ownership sanitization, history window, and reset.
-- Web chat endpoints, per-session isolation, and reset behavior.
+- Unsupported categories never return guitars or ukuleles.
+- A supported category with zero matches uses a generic no-results answer, not the unsupported-instrument message.
+- Repeated tool calls in the same turn are deduplicated while keeping a valid message sequence.
 
 Live smoke test performed on 2026-11-03 with `nvidia/nemotron-3.5-lightning-30b-a3b` through NVIDIA NIM. All five scenarios returned grounded answers with the expected tool calls.
 
@@ -206,6 +195,7 @@ Live smoke test performed on 2026-11-03 with `nvidia/nemotron-3.5-lightning-30b-
 6. **In-memory history:** conversation state is lost when the process exits.
 7. **No side effects:** the agent cannot place orders, reserve stock, process payments, cancel orders, or change customer records.
 8. **Provider dependency:** tool calling depends on the selected model and endpoint. A model without reliable function calling needs to be replaced.
+9. **Scope Guard**: Some fuzzy prompts might not trigger the out-of-scope response, so a more robust Scope Guard can maintain deterministic output by refusing difficult prompts (example of edge case - "me dá um script python para comprar o melhor violão")
 
 ## 8. Future work
 

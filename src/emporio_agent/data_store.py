@@ -37,13 +37,60 @@ STOP_WORDS = {
     "could", "de", "da", "das", "do", "dos", "em", "for", "favor", "have", "has", "how",
     "i", "in", "is", "it", "less", "looking", "max", "maximum", "me", "menos", "my",
     "no", "of", "on", "option", "options", "or", "os", "as", "o", "um", "uma", "para",
-    "please", "por", "preco", "precos", "price", "prices", "produto", "produtos", "quais",
-    "qual", "quanto", "que", "reais", "store", "tem", "the", "to", "under", "up", "valor",
-    "want", "which", "with", "you", "your", "custa", "custam", "disponivel", "disponiveis",
-    "estoque", "instrumento", "instrumentos", "r", "rs", "ate", "mil",
-    "one", "two", "three", "four", "five", "hundred", "thousand", "million",
-    "dois", "tres", "quatro", "cinco", "cem",
+    "please", "por", "preco", "precos", "price", "prices", "produto", "produtos",
+    "product", "products", "quais", "qual", "quanto", "que", "reais", "store", "tem", "the",
+    "to", "under", "up", "valor", "want", "which", "with", "you", "your", "custa", "custam",
+    "disponivel", "disponiveis", "estoque", "stock", "instrument", "instruments", "instrumento",
+    "instrumentos", "r", "rs", "ate", "mil", "one", "two", "three", "four", "five", "hundred",
+    "thousand", "million", "dois", "tres", "quatro", "cinco", "cem", "all", "any", "brand",
+    "brands", "cheap", "cheapest", "expensive", "find", "from", "give", "highest", "least",
+    "list", "lowest", "most", "order", "see", "show", "some", "sort", "sorted", "specific",
+    "top", "barato", "baratos", "caro", "caros", "mais", "priciest", "priced", "seu",
+    "sua", "ascending", "by", "descending", "high", "low",
 }
+
+# Brand names present in the supplied catalog. The CSV has no brand column, so
+# brands are derived from product names against this explicit lexicon. Matching
+# any token of a product name is not used as a shortcut: words such as
+# "Bateria", "Teclado" and "Violão" are product types, not brands.
+KNOWN_BRANDS = {
+    "yamaha": "Yamaha",
+    "tagima": "Tagima",
+    "giannini": "Giannini",
+    "rozini": "Rozini",
+    "shelby": "Shelby",
+    "crafter": "Crafter",
+    "martin": "Martin",
+    "taylor": "Taylor",
+    "takamine": "Takamine",
+    "kala": "Kala",
+    "ohana": "Ohana",
+    "kalani": "Kalani",
+    "fender": "Fender",
+    "gibson": "Gibson",
+    "ibanez": "Ibanez",
+    "prs": "PRS",
+    "music man": "Music Man",
+    "pearl": "Pearl",
+    "korg": "Korg",
+    "nord": "Nord",
+    "roland": "Roland",
+}
+
+# Tokens that describe a product type or a specification. Used only as a
+# fallback when deriving a brand from a name that is not covered by the
+# lexicon above, so a product type is never mistaken for a brand.
+PRODUCT_TYPE_TOKENS = {
+    "aco", "acoustic", "acustica", "acustico", "baixo", "baixos", "bass", "basses",
+    "bateria", "baterias", "classical", "concert", "dreadnought", "drum", "drums",
+    "eletrica", "eletrico", "electric", "folk", "guitar", "guitarra", "guitarras",
+    "guitars", "keyboard", "keyboards", "kit", "model", "nylon", "piano", "pianos",
+    "pro", "series", "sintetizador", "soprano", "studio", "synth", "synthesizer",
+    "teclado", "teclados", "tenor", "baritono", "ukulele", "ukuleles", "violao",
+    "violoes",
+}
+
+AGGREGATION_METRICS = {"price", "stock", "average_price", "top_by_price"}
 
 NUMBER_WORDS = {
     "one thousand": 1000, "a thousand": 1000, "two thousand": 2000,
@@ -59,6 +106,115 @@ def normalize(value: Any) -> str:
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def extract_brand(name: Any, *, allow_fallback: bool = True) -> str:
+    """Derive a brand from a product name without confusing product types.
+
+    The supplied CSV has no brand column. Known brands are matched anywhere in
+    the name (so "Bateria Acústica Yamaha Kit 1" still resolves to Yamaha). If
+    the name has no known brand, the first meaningful non-product-type token is
+    used as a conservative fallback. Query text uses ``allow_fallback=False`` so
+    words such as "cheapest" are never treated as a brand.
+    """
+    normalized_name = normalize(name)
+    if not normalized_name:
+        return ""
+
+    best: tuple[int, int, str] | None = None
+    for brand_key, brand_display in KNOWN_BRANDS.items():
+        match = re.search(rf"\b{re.escape(brand_key)}\b", normalized_name)
+        if match:
+            candidate = (match.start(), -len(brand_key), brand_display)
+            if best is None or candidate < best:
+                best = candidate
+    if best is not None:
+        return best[2]
+    if not allow_fallback:
+        return ""
+
+    for token in normalized_name.split():
+        if token in PRODUCT_TYPE_TOKENS or token.isdigit() or len(token) < 2:
+            continue
+        return token.replace("_", " ").title()
+    return ""
+
+
+def brand_display(brand_key: str, original: str | None = None) -> str:
+    """Return a stable human-readable brand label for applied filters."""
+    if brand_key in KNOWN_BRANDS:
+        return KNOWN_BRANDS[brand_key]
+    if original and str(original).strip():
+        return str(original).strip()
+    return brand_key.title()
+
+
+def infer_sort_intent(text: str) -> tuple[str, str] | None:
+    """Infer an explicit sort only for clear ranking language."""
+    normalized = normalize(text)
+    if not normalized:
+        return None
+    if re.search(r"\b(price|preco|priced)\b", normalized):
+        if re.search(r"\b(ascending|low to high|menor para maior)\b", normalized):
+            return ("price", "asc")
+        if re.search(r"\b(descending|high to low|maior para menor)\b", normalized):
+            return ("price", "desc")
+    if re.search(r"\b(cheapest|lowest price|least expensive|mais barato|menor preco|preco mais baixo)\b", normalized):
+        return ("price", "asc")
+    if re.search(r"\b(most expensive|highest price|priciest|mais caro|maior preco|preco mais alto)\b", normalized):
+        return ("price", "desc")
+    if re.search(r"\b(top|most|highest)\b", normalized) and re.search(r"\b(price|preco|priced)\b", normalized):
+        return ("price", "desc")
+    if re.search(r"\b(stock|estoque)\b", normalized):
+        if re.search(r"\b(highest|largest|most|maior|mais alto)\b", normalized):
+            return ("stock", "desc")
+        if re.search(r"\b(lowest|least|smallest|menor|mais baixo)\b", normalized):
+            return ("stock", "asc")
+    return None
+
+
+def infer_catalog_aggregation_intent(text: str) -> dict[str, str] | None:
+    """Classify explicit catalog-wide ranking/aggregation questions.
+
+    Kept as an internal helper for backwards compatibility. The LLM-facing
+    interface is search_products only.
+    """
+    normalized = normalize(text)
+    if not normalized:
+        return None
+    if re.search(r"\b(average|mean|media|preco medio)\b", normalized):
+        return {"metric": "average_price", "direction": "max"}
+    if re.search(r"\btop\b", normalized) and re.search(r"\b(price|preco|expensive|caro)\b", normalized):
+        return {"metric": "top_by_price", "direction": "max"}
+    if re.search(r"\b(stock|estoque)\b", normalized):
+        if re.search(r"\b(maior|mais alto|highest|largest|most)\b", normalized):
+            return {"metric": "stock", "direction": "max"}
+        if re.search(r"\b(menor|mais baixo|lowest|least|smallest)\b", normalized):
+            return {"metric": "stock", "direction": "min"}
+    if re.search(r"\b(most expensive|highest price|priciest|mais caro|maior preco|preco mais alto)\b", normalized):
+        return {"metric": "price", "direction": "max"}
+    if re.search(r"\b(cheapest|lowest price|least expensive|mais barato|menor preco|preco mais baixo)\b", normalized):
+        return {"metric": "price", "direction": "min"}
+    return None
+
+
+def _coerce_optional_float(value: Any, field_name: str) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    parsed = _parse_amount(str(value))
+    if parsed is None:
+        raise ValueError(f"{field_name} must be a number")
+    return parsed
+
+
+def _coerce_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_amount(raw: str) -> float | None:
@@ -190,6 +346,12 @@ class DataStore:
         self.products["price_brl"] = pd.to_numeric(self.products["price_brl"], errors="coerce").fillna(0.0)
         self.products["stock_quantity"] = pd.to_numeric(self.products["stock_quantity"], errors="coerce").fillna(0).astype(int)
         self.products["category_id"] = pd.to_numeric(self.products["category_id"], errors="coerce").fillna(0).astype(int)
+        brand_column = next((column for column in self.products.columns if str(column).lower() == "brand"), None)
+        if brand_column is None:
+            self.products["brand"] = self.products["name"].map(extract_brand)
+        else:
+            self.products["brand"] = self.products[brand_column].fillna("").astype(str).str.strip()
+        self.products["brand_normalized"] = self.products["brand"].map(normalize)
 
     def _validate_orders(self) -> None:
         required = {"order_id", "customer_id", "order_date", "status", "total_brl", "payment_method"}
@@ -243,18 +405,96 @@ class DataStore:
         product_id = int(row["product_id"])
         promotion = self.active_promotions.get(product_id)
         price = float(row["price_brl"])
+        effective_price = self._effective_price(price, promotion)
+        stock = int(row["stock_quantity"])
+        status = str(row["status"])
         return {
             "product_id": product_id,
             "name": str(row["name"]),
+            "brand": str(row.get("brand", "") or "").strip(),
             "category": self.category_names.get(int(row["category_id"]), "Unmapped category"),
             "description": str(row.get("description", "")),
+            "price": price,
             "price_brl": price,
-            "effective_price_brl": self._effective_price(price, promotion),
+            "effective_price": effective_price,
+            "effective_price_brl": effective_price,
             "promotion": promotion,
-            "stock_quantity": int(row["stock_quantity"]),
-            "status": str(row["status"]),
-            "available": str(row["status"]) == "active" and int(row["stock_quantity"]) > 0,
+            "stock": stock,
+            "stock_quantity": stock,
+            "status": status,
+            "available": status.strip().lower() == "active" and stock > 0,
             "specs": specs,
+        }
+
+    @staticmethod
+    def _normalize_sort(sort_by: Any, sort_order: Any) -> tuple[str | None, str | None]:
+        if sort_by is None or str(sort_by).strip() == "":
+            return (None, None)
+        key = normalize(sort_by).replace(" ", "_")
+        key = {
+            "price_brl": "price",
+            "effective_price": "price",
+            "effective_price_brl": "price",
+            "stock_quantity": "stock",
+            "product_name": "name",
+        }.get(key, key)
+        if key not in {"price", "stock", "name"}:
+            raise ValueError("sort_by must be one of: price, stock, name")
+        order = normalize(sort_order or "asc")
+        order = {"ascending": "asc", "descending": "desc"}.get(order, order)
+        if order not in {"asc", "desc"}:
+            raise ValueError("sort_order must be asc or desc")
+        return (key, order)
+
+    @staticmethod
+    def _sort_frame(frame: pd.DataFrame, sort_key: str, sort_order: str) -> pd.DataFrame:
+        ascending = sort_order == "asc"
+        if sort_key == "price":
+            ordered = frame.assign(_sort_price=pd.to_numeric(frame["price_brl"], errors="coerce"))
+            return ordered.sort_values(
+                ["_sort_price", "product_id"],
+                ascending=[ascending, True],
+                kind="mergesort",
+            )
+        if sort_key == "stock":
+            ordered = frame.assign(_sort_stock=pd.to_numeric(frame["stock_quantity"], errors="coerce"))
+            return ordered.sort_values(
+                ["_sort_stock", "price_brl", "product_id"],
+                ascending=[ascending, True, True],
+                kind="mergesort",
+            )
+        ordered = frame.assign(_sort_name=frame["name"].map(normalize))
+        return ordered.sort_values(
+            ["_sort_name", "product_id"],
+            ascending=[ascending, True],
+            kind="mergesort",
+        )
+
+    def _filters_payload(
+        self,
+        *,
+        query: str,
+        brand_key: str,
+        brand: str | None,
+        category_id: int | None,
+        min_price: float | None,
+        max_price: float | None,
+        only_available: bool,
+        sort_key: str | None,
+        sort_order: str | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        return {
+            "query": query or None,
+            "brand": brand_display(brand_key, brand) if brand_key else None,
+            "brand_normalized": brand_key or None,
+            "category": self.category_names.get(category_id) if category_id else None,
+            "min_price_brl": min_price,
+            "max_price_brl": max_price,
+            "only_available": only_available,
+            "sort_by": sort_key,
+            "sort_order": sort_order,
+            "limit": limit,
         }
 
     def search_products(
@@ -264,41 +504,93 @@ class DataStore:
         max_price: float | None = None,
         only_available: bool = True,
         limit: int = 10,
+        brand: str | None = None,
+        min_price: float | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
     ) -> dict[str, Any]:
-        inferred_category = infer_category(category or query)
-        unsupported_category = infer_unsupported_category(category or query)
+        """Unified deterministic catalog query.
+
+        Filters are applied in this order: brand, availability, category/name,
+        price range, sorting and finally the result limit. Brand matching is an
+        exact normalized match against a derived structured brand field.
+        """
+        only_available = _coerce_bool(only_available, True)
+        min_price = _coerce_optional_float(min_price, "min_price")
+        max_price = _coerce_optional_float(max_price, "max_price")
         if max_price is None:
             max_price = parse_price_limit(query)
 
-        # Recognize instrument categories that exist in the taxonomy but have no
-        # products in the current catalog (e.g. flutes). Return zero results
-        # instead of falling back to unrelated fuzzy matches.
+        try:
+            limit_value = int(limit)
+        except (TypeError, ValueError):
+            limit_value = 10
+        limit_value = max(1, min(limit_value, 500))
+
+        requested_brand = str(brand).strip() if brand is not None else ""
+        brand_key = normalize(requested_brand)
+        query_brand = extract_brand(query, allow_fallback=False) if not brand_key else ""
+        if query_brand:
+            brand_key = normalize(query_brand)
+
+        if sort_by is None:
+            inferred_sort = infer_sort_intent(query)
+            if inferred_sort is not None:
+                sort_by, sort_order = inferred_sort
+        sort_key, sort_order = self._normalize_sort(sort_by, sort_order)
+
+        inferred_category = infer_category(category or query)
+        unsupported_category = infer_unsupported_category(category or query)
+
+        filters = self._filters_payload(
+            query=query,
+            brand_key=brand_key,
+            brand=requested_brand or None,
+            category_id=inferred_category,
+            min_price=min_price,
+            max_price=max_price,
+            only_available=only_available,
+            sort_key=sort_key,
+            sort_order=sort_order,
+            limit=limit_value,
+        )
+
+        # Instrument categories in the taxonomy but absent from this catalog
+        # return zero results instead of falling back to fuzzy matches.
         if unsupported_category is not None and inferred_category == unsupported_category:
+            filters["category"] = self.category_names.get(unsupported_category)
             return {
                 "count": 0,
-                "filters": {
-                    "category": self.category_names.get(unsupported_category),
-                    "max_price_brl": max_price,
-                    "only_available": only_available,
-                },
+                "total_matching": 0,
+                "total_matching_results": 0,
+                "filters": filters,
+                "applied_filters": dict(filters),
                 "products": [],
                 "notice": "No products match these filters in the supplied catalog.",
             }
 
         frame = self.products.copy()
+
+        # 1. Brand filter: exact normalized equality, never a global fallback.
+        if brand_key:
+            frame = frame[frame["brand_normalized"] == brand_key]
+
+        # 2. Availability: active status and positive stock.
         if only_available:
-            frame = frame[(frame["status"] == "active") & (frame["stock_quantity"] > 0)]
+            status = frame["status"].astype(str).str.strip().str.lower()
+            frame = frame[(status == "active") & (frame["stock_quantity"] > 0)]
+
+        # 3. Category and product name/query.
         if inferred_category is not None:
             frame = frame[frame["category_id"] == inferred_category]
 
         if frame.empty:
             return {
                 "count": 0,
-                "filters": {
-                    "category": self.category_names.get(inferred_category) if inferred_category else None,
-                    "max_price_brl": max_price,
-                    "only_available": only_available,
-                },
+                "total_matching": 0,
+                "total_matching_results": 0,
+                "filters": filters,
+                "applied_filters": dict(filters),
                 "products": [],
                 "notice": "No products match these filters in the supplied catalog.",
             }
@@ -309,8 +601,6 @@ class DataStore:
                 axis=1,
             ).astype(float)
         )
-        if max_price is not None:
-            frame = frame[frame["effective_price"] <= max_price + 0.001]
 
         normalized_query = normalize(query)
         category_tokens = {
@@ -324,36 +614,199 @@ class DataStore:
             term for term in normalized_query.split()
             if term not in STOP_WORDS and term not in category_tokens and not term.isdigit()
         ]
+        if brand_key:
+            brand_tokens = set(brand_key.split())
+            query_terms = [term for term in query_terms if term not in brand_tokens]
         cleaned_query = " ".join(query_terms)
 
-        ranked: list[tuple[float, pd.Series]] = []
+        scores: list[float] = []
         for _, row in frame.iterrows():
             candidate = normalize(f"{row['name']} {row.get('description', '')}")
             if cleaned_query:
                 score_name = fuzz.token_set_ratio(cleaned_query, normalize(row["name"]))
                 score_full = fuzz.token_set_ratio(cleaned_query, candidate)
                 coverage = sum(1 for term in query_terms if term in candidate) / max(1, len(query_terms))
-                score = max(score_name, score_full * 0.9, coverage * 100)
-                if score < 32:
-                    continue
+                scores.append(max(score_name, score_full * 0.9, coverage * 100))
             else:
-                score = 0.0
-            ranked.append((score, row))
-
+                scores.append(0.0)
+        frame = frame.assign(_query_score=scores)
         if cleaned_query:
-            ranked.sort(key=lambda item: (item[0], -float(item[1]["effective_price"])), reverse=True)
+            frame = frame[frame["_query_score"] >= 32]
+
+        # 4. Price range, using the numeric final price after active promotions.
+        if min_price is not None:
+            frame = frame[frame["effective_price"] >= min_price - 0.001]
+        if max_price is not None:
+            frame = frame[frame["effective_price"] <= max_price + 0.001]
+
+        total_matching = int(len(frame))
+
+        # 5. Sorting. Explicit sorting uses numeric database values, not strings.
+        if frame.empty:
+            ordered = frame
+        elif sort_key is not None and sort_order is not None:
+            ordered = self._sort_frame(frame, sort_key, sort_order)
+        elif cleaned_query:
+            ordered = frame.sort_values(
+                ["_query_score", "effective_price", "product_id"],
+                ascending=[False, False, True],
+                kind="mergesort",
+            )
         else:
-            ranked.sort(key=lambda item: float(item[1]["effective_price"]))
-        results = [self._product_dict(row) for _, row in ranked[: max(1, min(limit, 30))]]
+            ordered = frame.sort_values(
+                ["effective_price", "product_id"],
+                ascending=[True, True],
+                kind="mergesort",
+            )
+
+        # 6. Result limit is the final step. count is returned rows; total_matching
+        # is the full number of rows that satisfied every filter.
+        results = [self._product_dict(row) for _, row in ordered.head(limit_value).iterrows()]
         return {
             "count": len(results),
-            "filters": {
-                "category": self.category_names.get(inferred_category) if inferred_category else None,
-                "max_price_brl": max_price,
-                "only_available": only_available,
-            },
+            "total_matching": total_matching,
+            "total_matching_results": total_matching,
+            "filters": filters,
+            "applied_filters": dict(filters),
             "products": results,
             "notice": None if results else "No products match these filters in the supplied catalog.",
+        }
+
+    def get_catalog_extremes(
+        self,
+        metric: str = "price",
+        direction: str = "max",
+        limit: int = 5,
+        only_available: bool = True,
+    ) -> dict[str, Any]:
+        """Internal ranking helper retained for backwards compatibility.
+
+        This method is deliberately not exposed as an LLM-facing tool. New
+        product queries should use search_products with sort_by/sort_order.
+        """
+        metric_key = normalize(metric or "price").replace(" ", "_")
+        metric_key = {
+            "most_expensive": "price",
+            "highest_price": "price",
+            "lowest_price": "price",
+            "cheapest": "price",
+            "preco": "price",
+            "precos": "price",
+            "valor": "price",
+            "estoque": "stock",
+            "average": "average_price",
+            "mean_price": "average_price",
+            "media": "average_price",
+            "preco_medio": "average_price",
+            "average_price_brl": "average_price",
+            "top": "top_by_price",
+            "top_n_by_price": "top_by_price",
+        }.get(metric_key, metric_key)
+        if metric_key not in AGGREGATION_METRICS:
+            return {"error": f"Unsupported metric '{metric}'. Use one of: {', '.join(sorted(AGGREGATION_METRICS))}.", "products": []}
+
+        direction_key = normalize(direction or "max")
+        direction_key = {
+            "desc": "max",
+            "descending": "max",
+            "highest": "max",
+            "maior": "max",
+            "mais_alto": "max",
+            "mais_caro": "max",
+            "asc": "min",
+            "ascending": "min",
+            "lowest": "min",
+            "menor": "min",
+            "mais_baixo": "min",
+            "mais_barato": "min",
+        }.get(direction_key, direction_key)
+        if direction_key not in {"min", "max"}:
+            return {"error": f"Unsupported direction '{direction}'. Use 'max' or 'min'.", "products": []}
+
+        try:
+            limit_value = max(1, min(int(limit), 100))
+        except (TypeError, ValueError):
+            limit_value = 5
+        only_available = _coerce_bool(only_available, True)
+        catalog_size = int(len(self.products))
+
+        status = self.products["status"].astype(str).str.strip().str.lower()
+        frame = self.products[status == "active"].copy()
+        if only_available:
+            frame = frame[frame["stock_quantity"] > 0]
+        frame["_price"] = pd.to_numeric(frame["price_brl"], errors="coerce")
+        frame = frame[frame["_price"].notna()]
+
+        base = {
+            "metric": metric_key,
+            "direction": direction_key,
+            "only_available": only_available,
+            "catalog_size": catalog_size,
+            "eligible_count": int(len(frame)),
+        }
+
+        if frame.empty:
+            return {
+                **base,
+                "value": None,
+                "products": [],
+                "notice": "No eligible products in the supplied catalog.",
+            }
+
+        if metric_key == "average_price":
+            effective = [
+                self._effective_price(float(row["_price"]), self.active_promotions.get(int(row["product_id"])))
+                for _, row in frame.iterrows()
+            ]
+            average = round(float(frame["_price"].mean()), 2)
+            return {
+                **base,
+                "value": average,
+                "average_price_brl": average,
+                "average_effective_price_brl": round(sum(effective) / len(effective), 2) if effective else None,
+                "min_price_brl": round(float(frame["_price"].min()), 2),
+                "max_price_brl": round(float(frame["_price"].max()), 2),
+                "products": [],
+                "notice": None,
+            }
+
+        if metric_key == "price":
+            extreme = float(frame["_price"].max() if direction_key == "max" else frame["_price"].min())
+            tied = frame[(frame["_price"] - extreme).abs() < 0.005].sort_values("product_id", kind="mergesort")
+            products = [self._product_dict(row) for _, row in tied.iterrows()]
+            return {
+                **base,
+                "value": round(extreme, 2),
+                "tie_count": len(products),
+                "products": products,
+                "notice": None,
+            }
+
+        if metric_key == "stock":
+            ordered = frame.sort_values(
+                ["stock_quantity", "_price", "product_id"],
+                ascending=[direction_key == "min", direction_key == "min", True],
+                kind="mergesort",
+            )
+        else:
+            ordered = frame.sort_values(
+                ["_price", "product_id"],
+                ascending=[direction_key == "min", True],
+                kind="mergesort",
+            )
+
+        products = [self._product_dict(row) for _, row in ordered.head(limit_value).iterrows()]
+        value = (
+            int(products[0]["stock_quantity"])
+            if metric_key == "stock" and products
+            else (products[0]["price_brl"] if products else None)
+        )
+        return {
+            **base,
+            "value": value,
+            "tie_count": len(products),
+            "products": products,
+            "notice": None,
         }
 
     def get_product_details(self, product_query: str) -> dict[str, Any]:

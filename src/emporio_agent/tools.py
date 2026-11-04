@@ -18,8 +18,22 @@ class AgentTools:
         max_price: float | None = None,
         only_available: bool = True,
         limit: int = 10,
+        brand: str | None = None,
+        min_price: float | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
     ) -> dict[str, Any]:
-        return self.data.search_products(query, category, max_price, only_available, limit)
+        return self.data.search_products(
+            query=query,
+            category=category,
+            max_price=max_price,
+            only_available=only_available,
+            limit=limit,
+            brand=brand,
+            min_price=min_price,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
 
     def get_product_details(self, product_query: str) -> dict[str, Any]:
         return self.data.get_product_details(product_query)
@@ -68,20 +82,26 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "search_products",
             "description": (
-                "Search the product catalog for price, stock, category, and active promotions. "
-                "Use this before mentioning availability or prices. By default it returns only "
-                "active products with positive stock."
+                "Unified product catalog query for search, filtering, ranking, and stock/price checks. "
+                "Use this for every product question, including cheapest/most expensive and top-N "
+                "rankings. Filtering and sorting are deterministic inside the tool. By default it "
+                "returns only active products with positive stock. An empty result means no product "
+                "matched the filters; never replace a brand filter with catalog-wide results."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Product name, brand, model, instrument, or description."},
+                    "query": {"type": "string", "description": "Optional product name, model, instrument, or description. Omit to browse."},
+                    "brand": {"type": "string", "description": "Optional exact brand name, matched case-insensitively, e.g. Yamaha, Tagima, Martin, Nord."},
                     "category": {"type": "string", "description": "Optional category, e.g. acoustic guitars, electric guitars, basses, drums, keyboards, or ukuleles."},
+                    "min_price": {"type": "number", "description": "Minimum final price in BRL, without the currency symbol."},
                     "max_price": {"type": "number", "description": "Maximum final price in BRL, without the currency symbol."},
-                    "only_available": {"type": "boolean", "description": "Keep true to show only active items with positive stock."},
-                    "limit": {"type": "integer", "description": "Maximum number of results (1 to 30)."},
+                    "only_available": {"type": "boolean", "description": "Default true: active status and stock greater than zero. Set false to include unavailable items."},
+                    "sort_by": {"type": "string", "enum": ["price", "stock", "name"], "description": "Sort field using numeric price, numeric stock, or product name."},
+                    "sort_order": {"type": "string", "enum": ["asc", "desc"], "description": "Sort direction. Use desc for most expensive and asc for cheapest."},
+                    "limit": {"type": "integer", "description": "Maximum number of returned rows after all filters (1 to 500)."},
                 },
-                "required": ["query"],
+                "required": [],
                 "additionalProperties": False,
             },
         },
